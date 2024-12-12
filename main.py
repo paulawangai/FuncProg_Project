@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Iterator
 from functools import reduce
-from pathlib import Path
 from enum import Enum, auto
 import re
 import sys
@@ -284,36 +283,76 @@ def tokenize(text: str) -> Iterator[str]:
     yield from filter(bool, clean_text(text).split())
 
 
-def process_file_to_words(file_path: str) -> Iterator[str]:
+# Type aliases for return types
+ProcessResult = Tuple[Iterator[str], int]  # words and count
+TreeResult = Tuple[RedBlackTree, int]  # tree and count
+WriteResult = Tuple[bool, int]  # success and count
+
+
+@dataclass(frozen=True)
+class ProcessStats:
+    """Immutable container for process statistics"""
+    word_count: int
+    unique_words: int
+    success: bool
+    message: str
+
+
+def process_file_to_words(file_path: str) -> ProcessResult:
     """
-    Process file and return iterator of unique words
-    functional-composition of read_file -> clean_text -> tokenize
+    Pure function to process file and return unique words.
+    Uses function composition and immutable data structures.
     """
+
+    def read_lines(path: str) -> Iterator[str]:
+        with open(path, 'r', encoding='utf-8') as file:
+            yield from file
+
+    def tokenize_lines(lines: Iterator[str]) -> Iterator[str]:
+        return (
+            word for line in lines
+            for word in tokenize(line)
+        )
+
+    def get_unique_words(words: Iterator[str]) -> Tuple[Iterator[str], int]:
+        word_set = set(words)  # Using set for uniqueness
+        return iter(sorted(word_set)), len(word_set)
+
     try:
-        # pipeline
-        return (word for line in read_file(file_path) for word in tokenize(line))
-    except FileNotFoundError:
-        print(f"Error: file {file_path} not found")
-        return iter([])  # return empty iterator
-    except Exception as e:
-        print(f"Error processing file: {str(e)}")
-        return iter([])
+        # Function composition
+        lines = read_lines(file_path)
+        words = tokenize_lines(lines)
+        unique_words, count = get_unique_words(words)
+        return unique_words, count
+    except Exception:
+        return iter([]), 0
 
 
-def build_tree_from_words(words: Iterator[str]) -> RedBlackTree:
+def build_tree_from_words(words: Iterator[str]) -> TreeResult:
     """
-    Build the RedBlackTree from an iterator of words using reduce()
+    Pure function to build tree from words.
+    Uses reduce for functional construction.
     """
-    def insert_word(tree: RedBlackTree, word: str) -> RedBlackTree:
-        return tree.insert(word)
+    # Convert to list once to avoid multiple iterator passes
+    word_list = list(words)
 
-    return reduce(insert_word, words, RedBlackTree())
+    def build_tree(word_list: List[str]) -> RedBlackTree:
+        return reduce(
+            lambda tree, word: tree.insert(word),
+            word_list,
+            RedBlackTree()
+        )
+
+    tree = build_tree(word_list)
+    return tree, len(word_list)
 
 
 def traverse_in_order(tree: RedBlackTree) -> Iterator[str]:
     """
-    Pure function for in-order traversal that yields unique sorted words.
+    Pure function for in-order traversal.
+    Uses recursive generator for functional approach.
     """
+
     def traverse_node(node: Optional[Node]) -> Iterator[str]:
         if node is None:
             return
@@ -325,84 +364,65 @@ def traverse_in_order(tree: RedBlackTree) -> Iterator[str]:
         yield from traverse_node(tree._root)
 
 
-def write_words_to_file(words: Iterator[str], output_path: str) -> None:
+def write_words_to_file(words: Iterator[str], output_path: str) -> WriteResult:
     """
-    Write words to file in a functional way, with buffering for efficiency.
+    Write words to file and return status.
+    Isolates side effects and returns result.
     """
     try:
-        # Convert iterator to sorted unique words
-        unique_words = sorted(set(words))
+        # Convert iterator to list once
+        word_list = list(words)
 
-        # Write in chunks for efficiency
         with open(output_path, 'w', encoding='utf-8', buffering=8192) as f:
-            f.write('\n'.join(unique_words))
+            f.write('\n'.join(word_list))
 
-        print(f"Wrote {len(unique_words)} unique words to {output_path}")
-
-    except Exception as e:
-        print(f"Error writing to file: {str(e)}")
-
-
-def process_and_save(input_path: str, output_path: str) -> None:
-    """
-    Process input file and save sorted words to output file.
-    Uses functional pipeline for processing.
-    """
-
-    try:
-        print(f"Processing {input_path}...")
-
-        # Functional pipeline
-        # Process file in chunks to avoid mem issues and build tree
-        words = process_file_to_words(input_path)
-        tree = build_tree_from_words(words)
-        sorted_words = traverse_in_order(tree)
-
-        # Handle side effect (file writing) separately
-        write_words_to_file(sorted_words, output_path)
-
-        print(f"Successfully processed {input_path} and saved to {output_path}")
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-
-
-# Function to compose all pure operations
-def process_to_sorted_words(input_path: str) -> Iterator[str]:
-    """
-    Pure function that composes all processing steps.
-    """
-    return traverse_in_order(
-        build_tree_from_words(
-            process_file_to_words(input_path)
-        )
-    )
+        return True, len(word_list)
+    except Exception:
+        return False, 0
 
 
 def main() -> None:
     """
-    Main function to process War and Peace and create a sorted word list.
+    Main function with integration of all processing steps:
+    1. Read and tokenize text file
+    2. Insert unique words into red-black tree
+    3. Traverse tree for sorted list
+    4. Write sorted list to output file
     """
-
     try:
         input_file = "war_and_peace.txt"
         output_file = "output.txt"
 
-        print("Starting file processing...")
-        process_and_save(input_file, output_file)
-        print("Processing completed successfully!")
+        # 1. Read and tokenize text file
+        words, initial_count = process_file_to_words(input_file)
+        if initial_count == 0:
+            print("No words found in input file")
+            return
+
+        # 2. Build tree with unique words
+        tree, tree_count = build_tree_from_words(words)
+        if tree_count == 0:
+            print("Failed to build tree")
+            return
+
+        # 3. Get sorted words through traversal
+        sorted_words = traverse_in_order(tree)
+        if not sorted_words:
+            print("Tree traversal yielded no words")
+            return
+
+        # 4. Write sorted words to file
+        success, final_count = write_words_to_file(sorted_words, output_file)
+
+        # Report results
+        if success:
+            print(f"Successfully processed {initial_count} words")
+            print(f"Wrote {final_count} unique words to {output_file}")
+        else:
+            print("Failed to write words to file")
 
     except Exception as e:
-        print(f"Error in main: {str(e)}")
-
-    # 1. Read file
-    # 2. Process text
-
-    # Pipeline will be implemented here in subsequent steps
-
-    # 3. Build red-black tree
-    # 4. Extract sorted words
-    # 5. Write to output file
+        print(f"Error in processing: {str(e)}")
 
 
 if __name__ == "__main__":
