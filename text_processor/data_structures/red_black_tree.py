@@ -1,18 +1,6 @@
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Iterator
-from functools import reduce
-from enum import Enum, auto
-import re
-import sys
-
-# increase recursion limit - due to Error: maximum recursion depth exceeded
-sys.setrecursionlimit(10000)
-
-
-# colour enum for red black tree
-class Colour(Enum):
-    RED = auto()  # get assigned integer value
-    BLACK = auto()
+from typing import Optional
+from text_processor.data_structures.type_definitions import Colour
 
 
 # immutable (frozen=true) node class for red-black tree
@@ -21,20 +9,12 @@ class Colour(Enum):
 # Any attempt to modify attributes will raise FrozenInstanceError
 
 # node class for red - black tree, each node reps a word in the text and the relationship to the tree
-
-
 @dataclass(frozen=True)
 class Node:
     word: str
     colour: Colour
     left: Optional['Node'] = None
     right: Optional['Node'] = None
-
-
-# Type aliases
-
-Wordlist = List[str]
-TreeOperationResult = Tuple[Node, bool]
 
 
 class RedBlackTree:
@@ -51,6 +31,12 @@ class RedBlackTree:
 
     def root_colour(self) -> Optional[Colour]:
         return None if self.is_empty() else self._root.colour
+
+    def _size(self) -> int:
+        """Helper method to get approximate tree size"""
+        if self.is_empty():
+            return 0
+        return 1 + self.left()._size() + self.right()._size()
 
     def insert(self, word: str) -> 'RedBlackTree':
         """
@@ -73,9 +59,12 @@ class RedBlackTree:
     def _ins(self, word: str) -> 'RedBlackTree':
         """Helper method for insert, that returns a new tree
              - a red-topped tree might be returned"""
-
         if self.is_empty():
             return RedBlackTree(Node(word=word, colour=Colour.RED))
+
+        # If word already exists, return current tree without modification
+        if word == self._root.word:
+            return self
 
         return RedBlackTree._balance(self.root_colour(),
                                      self.left()._ins(word) if word < self._root.word
@@ -239,191 +228,3 @@ class RedBlackTree:
 
 
 # iterator - contains countable no. of values and can be traversed
-
-def read_file(file_path: str) -> Iterator[str]:
-    """
-     Reads a file and yields lines in a functional manner.
-
-     Args:
-         file_path: Path to input file
-
-    Yields:
-        Lines from the file
-    """
-
-    with open(file_path, 'r', encoding='utf-8') as file:
-        yield from file
-
-
-def clean_text(text: str) -> str:
-    """
-    Removes punctuation marks and numbers from text in a functional way
-
-    Args:
-        text: Input text to clean
-
-    Returns:
-        Cleaned text
-    """
-
-    return re.sub(r'[^\w\s]|\d', '', text.lower())
-
-
-def tokenize(text: str) -> Iterator[str]:
-    """
-    Splits text into words in a functional manner
-
-    Args:
-        text: Input text to tokenize
-
-    Yields:
-        Individual words
-    """
-
-    yield from filter(bool, clean_text(text).split())
-
-
-# Type aliases for return types
-ProcessResult = Tuple[Iterator[str], int]  # words and count
-TreeResult = Tuple[RedBlackTree, int]  # tree and count
-WriteResult = Tuple[bool, int]  # success and count
-
-
-@dataclass(frozen=True)
-class ProcessStats:
-    """Immutable container for process statistics"""
-    word_count: int
-    unique_words: int
-    success: bool
-    message: str
-
-
-def process_file_to_words(file_path: str) -> ProcessResult:
-    """
-    Pure function to process file and return unique words.
-    Uses function composition and immutable data structures.
-    """
-
-    def read_lines(path: str) -> Iterator[str]:
-        with open(path, 'r', encoding='utf-8') as file:
-            yield from file
-
-    def tokenize_lines(lines: Iterator[str]) -> Iterator[str]:
-        return (
-            word for line in lines
-            for word in tokenize(line)
-        )
-
-    def get_unique_words(words: Iterator[str]) -> Tuple[Iterator[str], int]:
-        word_set = set(words)  # Using set for uniqueness
-        return iter(sorted(word_set)), len(word_set)
-
-    try:
-        # Function composition
-        lines = read_lines(file_path)
-        words = tokenize_lines(lines)
-        unique_words, count = get_unique_words(words)
-        return unique_words, count
-    except Exception:
-        return iter([]), 0
-
-
-def build_tree_from_words(words: Iterator[str]) -> TreeResult:
-    """
-    Pure function to build tree from words.
-    Uses reduce for functional construction.
-    """
-    # Convert to list once to avoid multiple iterator passes
-    word_list = list(words)
-
-    def build_tree(word_list: List[str]) -> RedBlackTree:
-        return reduce(
-            lambda tree, word: tree.insert(word),
-            word_list,
-            RedBlackTree()
-        )
-
-    tree = build_tree(word_list)
-    return tree, len(word_list)
-
-
-def traverse_in_order(tree: RedBlackTree) -> Iterator[str]:
-    """
-    Pure function for in-order traversal.
-    Uses recursive generator for functional approach.
-    """
-
-    def traverse_node(node: Optional[Node]) -> Iterator[str]:
-        if node is None:
-            return
-        yield from traverse_node(node.left)
-        yield node.word
-        yield from traverse_node(node.right)
-
-    if not tree.is_empty():
-        yield from traverse_node(tree._root)
-
-
-def write_words_to_file(words: Iterator[str], output_path: str) -> WriteResult:
-    """
-    Write words to file and return status.
-    Isolates side effects and returns result.
-    """
-    try:
-        # Convert iterator to list once
-        word_list = list(words)
-
-        with open(output_path, 'w', encoding='utf-8', buffering=8192) as f:
-            f.write('\n'.join(word_list))
-
-        return True, len(word_list)
-    except Exception:
-        return False, 0
-
-
-def main() -> None:
-    """
-    Main function with integration of all processing steps:
-    1. Read and tokenize text file
-    2. Insert unique words into red-black tree
-    3. Traverse tree for sorted list
-    4. Write sorted list to output file
-    """
-    try:
-        input_file = "war_and_peace.txt"
-        output_file = "output.txt"
-
-        # 1. Read and tokenize text file
-        words, initial_count = process_file_to_words(input_file)
-        if initial_count == 0:
-            print("No words found in input file")
-            return
-
-        # 2. Build tree with unique words
-        tree, tree_count = build_tree_from_words(words)
-        if tree_count == 0:
-            print("Failed to build tree")
-            return
-
-        # 3. Get sorted words through traversal
-        sorted_words = traverse_in_order(tree)
-        if not sorted_words:
-            print("Tree traversal yielded no words")
-            return
-
-        # 4. Write sorted words to file
-        success, final_count = write_words_to_file(sorted_words, output_file)
-
-        # Report results
-        if success:
-            print(f"Successfully processed {initial_count} words")
-            print(f"Wrote {final_count} unique words to {output_file}")
-        else:
-            print("Failed to write words to file")
-
-    except Exception as e:
-        print(f"Error in processing: {str(e)}")
-
-
-if __name__ == "__main__":
-    main()
